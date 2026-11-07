@@ -79,6 +79,28 @@ function extractBv(text) {
     return m ? m[0] : ''
 }
 
+/**
+ * 把各种残缺写法还原成标准 BV 号。
+ * 模型有时候会把 BV1 当成前缀吃掉，只回 8~10 位的尾巴，这里补回来。
+ * 认不出来就返回空串，宁可不记也不要存一条坏链接。
+ */
+function normalizeBv(input) {
+    const raw = String(input ?? '').trim()
+    if (!raw) return ''
+    // 带链接的先抽一遍
+    const fromUrl = extractBv(raw)
+    if (fromUrl) return fromUrl
+    // 去掉分隔符和前缀
+    const bare = raw.replace(/[^0-9A-Za-z]/g, '')
+    if (/^BV[0-9A-Za-z]{10}$/i.test(bare)) return 'BV' + bare.slice(2)
+    // 只剩尾巴的：BV 号一定含数字，纯字母的一律不认，免得把单词当号
+    if (!/[0-9]/.test(bare)) return ''
+    if (/^[0-9A-Za-z]{10}$/.test(bare)) return 'BV' + bare
+    // BV1 被整段吃掉时尾巴是 9 位
+    if (/^[0-9A-Za-z]{9}$/.test(bare)) return 'BV1' + bare
+    return ''
+}
+
 function cleanText(text) {
     return String(text ?? '')
         .replace(/\r\n/g, '\n')
@@ -139,9 +161,11 @@ class BiliMemoryService {
     /** 记一条看片记录。同一个 BV 会合并：分数取高、理由取长。 */
     record(entry = {}) {
         this.init()
-        const bvid = String(entry.bvid ?? extractBv(entry.url ?? '') ?? '').trim()
+        const rawBv = String(entry.bvid ?? '').trim() || String(entry.url ?? '').trim()
+        const bvid = normalizeBv(rawBv)
         const title = cleanText(entry.title ?? '')
         if (!bvid && !title) return { ok: false, error: '至少要有 BV 号或标题' }
+        if (rawBv && !bvid) return { ok: false, error: `BV 号认不出来：${rawBv}，要 BV 开头加 10 位` }
         if (isBlockedContent(`${title} ${entry.reason ?? ''} ${entry.quote ?? ''}`)) {
             return { ok: false, error: '这条涉及政治/娱乐圈，按规则不记' }
         }
